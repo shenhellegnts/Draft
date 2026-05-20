@@ -1,9 +1,47 @@
+<?php
+require_once __DIR__ . '/db.php';
+
+$settings = [];
+$settingRows = db_query('SELECT setting_key, setting_value FROM settings');
+if ($settingRows) {
+    while ($row = $settingRows->fetch_assoc()) {
+        $settings[$row['setting_key']] = $row['setting_value'];
+    }
+}
+$siteName = $settings['clinic_name'] ?? 'M.V. Masangkay Clinic';
+$siteSubtitle = $settings['clinic_subtitle'] ?? 'X-Ray & Laboratory';
+
+$serviceCategories = [];
+$categoryRows = db_query('SELECT id, name, slug FROM service_categories ORDER BY sort_order, name');
+if ($categoryRows) {
+    while ($row = $categoryRows->fetch_assoc()) {
+        $serviceCategories[] = $row;
+    }
+}
+
+$services = [];
+$serviceRows = db_query('SELECT s.*, c.slug AS category_slug, c.name AS category_name FROM services s JOIN service_categories c ON s.category_id = c.id WHERE s.active = 1 ORDER BY c.sort_order, s.name');
+if ($serviceRows) {
+    while ($row = $serviceRows->fetch_assoc()) {
+        $services[] = $row;
+    }
+}
+
+$serviceCategoryMap = array_column($serviceCategories, 'name', 'slug');
+
+$today = date('Y-m-d');
+$queueNow = db_row('SELECT queue_number, services FROM appointments WHERE status = ? ORDER BY preferred_date ASC, created_at ASC LIMIT 1', 's', ['pending']);
+$waitingCount = db_row('SELECT COUNT(*) AS cnt FROM appointments WHERE status = ?', 's', ['pending']);
+$doneToday = db_row('SELECT COUNT(*) AS cnt FROM appointments WHERE status = ? AND DATE(created_at) = ?', 'ss', ['done', $today]);
+$waitingCount = $waitingCount['cnt'] ?? 0;
+$doneToday = $doneToday['cnt'] ?? 0;
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>M.V. Masangkay X-Ray & Laboratory Clinic</title>
+  <title><?= htmlspecialchars($siteName) ?></title>
   <link rel="stylesheet" href="css/style.css"/>
   <link rel="stylesheet" href="css/patient.css"/>
 </head>
@@ -20,8 +58,8 @@
       </svg>
     </div>
     <div class="nav-brand-text">
-      <div class="clinic-title">M.V. Masangkay Clinic</div>
-      <div class="clinic-sub">X-Ray &amp; Laboratory</div>
+      <div class="clinic-title"><?= htmlspecialchars($siteName) ?></div>
+      <div class="clinic-sub"><?= htmlspecialchars($siteSubtitle) ?></div>
     </div>
   </div>
 
@@ -49,7 +87,7 @@
         Track Queue
       </div>
       <div class="dropdown-divider"></div>
-      <a class="dropdown-item admin-link" href="admin/login.html">
+      <a class="dropdown-item admin-link" href="admin/login.php">
         <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         Admin Login
       </a>
@@ -67,7 +105,7 @@
     <div class="patient-screen active" id="pstep-0">
       <div class="landing-wrap">
         <div class="landing-hero">
-          <h1>M.V Masangkay,<br><em>Appointment</em><br>System</h1>
+          <h1><?= htmlspecialchars($siteName) ?>,<br><em>Appointment</em><br>System</h1>
           <p>Skip the long lines. Book your lab tests and check-ups online. Get your queue number and wait for SMS updates.</p>
           <div class="feature-list">
             <div class="feature-item">
@@ -99,13 +137,13 @@
           <div class="queue-preview">
             <div class="queue-preview-header">
               <div class="qlabel">Now Serving</div>
-              <div class="qnum">#<span id="live-now">005</span></div>
-              <div class="qbadge">CBC Screening</div>
+              <div class="qnum"><?php if ($queueNow && !empty($queueNow['queue_number'])): ?>#<span id="live-now"><?= htmlspecialchars($queueNow['queue_number']) ?></span><?php else: ?><span id="live-now">—</span><?php endif; ?></div>
+              <div class="qbadge"><?= htmlspecialchars($queueNow['services'] ?? '—') ?></div>
             </div>
             <div class="queue-preview-body">
               <div class="queue-mini-stats">
                 <div class="qms">
-                  <div class="qval" id="live-waiting">9</div>
+                  <div class="qval" id="live-waiting"><?= htmlspecialchars($waitingCount) ?></div>
                   <div class="qlbl">Waiting</div>
                 </div>
                 <div class="qms">
@@ -113,7 +151,7 @@
                   <div class="qlbl">Per patient</div>
                 </div>
                 <div class="qms">
-                  <div class="qval" id="live-done">4</div>
+                  <div class="qval" id="live-done"><?= htmlspecialchars($doneToday) ?></div>
                   <div class="qlbl">Done today</div>
                 </div>
               </div>
@@ -186,7 +224,7 @@
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Date of Birth *</label>
-            <input type="date" class="form-control" id="patient-dob" value="1994-05-12"/>
+            <input type="date" class="form-control" id="patient-dob" />
           </div>
           <div class="form-group">
             <label class="form-label">Sex *</label>
@@ -232,92 +270,21 @@
           <!-- Service Category Tabs -->
           <div class="service-tabs">
             <button class="service-tab active" onclick="filterServices(this,'all')">All Services</button>
-            <button class="service-tab" onclick="filterServices(this,'lab')">Laboratory</button>
-            <button class="service-tab" onclick="filterServices(this,'diagnostic')">Diagnostics</button>
+            <?php foreach ($serviceCategories as $category): ?>
+              <button class="service-tab" onclick="filterServices(this,'<?= htmlspecialchars($category['slug']) ?>')"><?= htmlspecialchars($category['name']) ?></button>
+            <?php endforeach; ?>
           </div>
 
           <!-- Services Grid -->
           <div class="services-grid" id="services-grid">
-            <!-- Laboratory -->
-            <div class="service-item selected" data-cat="lab" data-basic="true" data-name="Complete Blood Count (CBC)" data-price="90" data-time="6" onclick="toggleService(this)">
+          <?php foreach ($services as $service): ?>
+            <div class="service-item<?= $service['is_basic'] ? ' selected' : '' ?>" data-cat="<?= htmlspecialchars($service['category_slug']) ?>" data-basic="<?= $service['is_basic'] ? 'true' : 'false' ?>" data-name="<?= htmlspecialchars($service['name']) ?>" data-price="<?= htmlspecialchars(number_format($service['price'], 0, '.', '')) ?>" data-time="<?= htmlspecialchars($service['duration']) ?>" onclick="toggleService(this)">
               <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Complete Blood Count (CBC)</div>
-              <div class="service-price"><strong>₱90</strong></div>
-              <div class="service-duration">~6 min</div>
+              <div class="service-name"><?= htmlspecialchars($service['name']) ?></div>
+              <div class="service-price"><strong>₱<?= htmlspecialchars(number_format($service['price'], 0, '.', '')) ?></strong></div>
+              <div class="service-duration">~<?= htmlspecialchars($service['duration']) ?> min</div>
             </div>
-            <div class="service-item selected" data-cat="lab" data-basic="true" data-name="Urinalysis" data-price="90" data-time="6" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Urinalysis</div>
-              <div class="service-price"><strong>₱90</strong></div>
-              <div class="service-duration">~6 min</div>
-            </div>
-            <div class="service-item selected" data-cat="lab" data-basic="true" data-name="Fecalysis" data-price="90" data-time="6" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Fecalysis</div>
-              <div class="service-price"><strong>₱90</strong></div>
-              <div class="service-duration">~6 min</div>
-            </div>
-            <div class="service-item" data-cat="lab" data-name="Pregnancy Test" data-price="150" data-time="5" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Pregnancy Test</div>
-              <div class="service-price"><strong>₱150</strong></div>
-              <div class="service-duration">~5 min</div>
-            </div>
-            <div class="service-item" data-cat="lab" data-name="Hepatitis B" data-price="200" data-time="10" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Hepatitis B</div>
-              <div class="service-price"><strong>₱200</strong></div>
-              <div class="service-duration">~10 min</div>
-            </div>
-            <div class="service-item" data-cat="lab" data-name="Hepatitis A" data-price="200" data-time="10" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Hepatitis A</div>
-              <div class="service-price"><strong>₱200</strong></div>
-              <div class="service-duration">~10 min</div>
-            </div>
-            <div class="service-item" data-cat="lab" data-name="Drug Test" data-price="280" data-time="10" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Drug Test</div>
-              <div class="service-price"><strong>₱280</strong></div>
-              <div class="service-duration">~10 min</div>
-            </div>
-            <div class="service-item" data-cat="lab" data-name="Blood Chemistry" data-price="450" data-time="20" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Blood Chemistry</div>
-              <div class="service-price"><strong>₱450</strong></div>
-              <div class="service-duration">~20 min</div>
-            </div>
-            <!-- Diagnostics -->
-            <div class="service-item selected" data-cat="diagnostic" data-basic="true" data-name="Physical Examination" data-price="300" data-time="15" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Physical Examination</div>
-              <div class="service-price"><strong>₱300</strong></div>
-              <div class="service-duration">~15 min</div>
-            </div>
-            <div class="service-item selected" data-cat="diagnostic" data-basic="true" data-name="Chest X-Ray" data-price="350" data-time="10" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Chest X-Ray</div>
-              <div class="service-price"><strong>₱350</strong></div>
-              <div class="service-duration">~10 min</div>
-            </div>
-            <div class="service-item" data-cat="diagnostic" data-name="ECG Examination" data-price="400" data-time="15" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">ECG Examination</div>
-              <div class="service-price"><strong>₱400</strong></div>
-              <div class="service-duration">~15 min</div>
-            </div>
-            <div class="service-item" data-cat="diagnostic" data-name="Ishihara Test" data-price="150" data-time="5" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Ishihara Test</div>
-              <div class="service-price"><strong>₱150</strong></div>
-              <div class="service-duration">~5 min</div>
-            </div>
-            <div class="service-item" data-cat="diagnostic" data-name="Audio Test" data-price="200" data-time="10" onclick="toggleService(this)">
-              <div class="check-badge"><svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
-              <div class="service-name">Audio Test</div>
-              <div class="service-price"><strong>₱200</strong></div>
-              <div class="service-duration">~10 min</div>
-            </div>
+          <?php endforeach; ?>
           </div>
 
           <!-- Custom Service -->
@@ -327,8 +294,8 @@
           </div>
           <!-- Preferred Date -->
           <div class="form-group">
-            <label class="form-label">Preferred Date &amp; Time</label>
-            <input type="datetime-local" class="form-control" id="appt-datetime" value="2025-06-10T08:00"/>
+            <label class="form-label">Preferred Date</label>
+            <input type="date" class="form-control" id="appt-datetime" />
           </div>
           <button class="btn btn-gray btn-sm mt-8" onclick="goPatientStep(3)">← Back to profile</button>
         </div>
@@ -365,33 +332,33 @@
         <div class="queue-card">
           <div class="queue-header">
             <div class="queue-label">Your Queue Number</div>
-            <div class="queue-number"><sup>#</sup><span id="my-queue-num">008</span></div>
-            <div class="queue-type-badge" id="my-queue-type">Hepatitis AB Screening</div>
+            <div class="queue-number"><sup>#</sup><span id="my-queue-num">—</span></div>
+            <div class="queue-type-badge" id="my-queue-type">—</div>
           </div>
           <div class="queue-body">
             <div class="queue-stats">
               <div class="queue-stat">
-                <div class="val" id="ahead-count">3</div>
+                <div class="val" id="ahead-count">—</div>
                 <div class="lbl">Ahead of you</div>
               </div>
               <div class="queue-stat">
-                <div class="val" id="est-wait">~15</div>
+                <div class="val" id="est-wait">—</div>
                 <div class="lbl">Est. wait (min)</div>
               </div>
               <div class="queue-stat">
-                <div class="val" id="total-today">9</div>
+                <div class="val" id="total-today">—</div>
                 <div class="lbl">Total today</div>
               </div>
             </div>
             <div class="serving-row">
               <div class="serving-card now-serving">
                 <div class="sc-lbl">Now Serving</div>
-                <div class="sc-val" id="now-serving-info">#005 — Mark Villanueva</div>
-                <div class="sc-lbl" style="margin-top:4px;" id="now-serving-service">CBC Screening</div>
+                <div class="sc-val" id="now-serving-info">—</div>
+                <div class="sc-lbl" style="margin-top:4px;" id="now-serving-service">—</div>
               </div>
               <div class="serving-card">
                 <div class="sc-lbl">Up Next</div>
-                <div class="sc-val" id="up-next-val">#006 — Ana Reyes</div>
+                <div class="sc-val" id="up-next-val">—</div>
               </div>
             </div>
             <div class="sms-note">
@@ -410,7 +377,7 @@
           <table class="appt-table">
             <tr><td>Patient</td><td class="fw-600" id="appt-det-patient">—</td></tr>
             <tr><td>Services</td><td class="fw-600" id="appt-det-services">—</td></tr>
-            <tr><td>Date &amp; Time</td><td class="fw-600" id="appt-det-date">—</td></tr>
+            <tr><td>Date</td><td class="fw-600" id="appt-det-date">—</td></tr>
             <tr><td>Queue #</td><td class="fw-600 text-blue" id="appt-det-queue">—</td></tr>
             <tr><td>Status</td><td><span class="tag blue">Waiting</span></td></tr>
           </table>

@@ -184,8 +184,6 @@ function saveProfileAndContinue() {
 }
 
 /* ─── Services ─── */
-const BASIC5_NAMES = ['Complete Blood Count (CBC)', 'Urinalysis', 'Fecalysis', 'Physical Examination', 'Chest X-Ray'];
-
 let basic5On = true; // starts with all selected
 
 function toggleService(el) {
@@ -262,31 +260,55 @@ function confirmBooking() {
     showToast('Please select at least one service.', 'error');
     return;
   }
-  const datetime = document.getElementById('appt-datetime').value;
-  if (!datetime) {
-    showToast('Please pick a preferred date and time.', 'error');
+  const preferredDate = document.getElementById('appt-datetime').value;
+  if (!preferredDate) {
+    showToast('Please pick a preferred date.', 'error');
     return;
   }
 
-  // Generate queue number
-  state.queueNum = Math.floor(Math.random() * 10) + 7;
-  const queueStr = String(state.queueNum).padStart(3, '0');
+  const bookingData = {
+    mobile: state.mobile.replace('+63', ''),
+    name: state.patient.name,
+    dob: state.patient.dob,
+    sex: state.patient.sex,
+    company: state.patient.company,
+    services: state.selectedServices,
+    custom_service: document.getElementById('custom-service').value.trim(),
+    preferred_date: preferredDate,
+  };
 
-  // Populate queue tracker
-  document.getElementById('my-queue-num').textContent = queueStr;
-  document.getElementById('my-queue-type').textContent = state.selectedServices.slice(0,2).join(' + ') + (state.selectedServices.length > 2 ? ' +more' : '');
-  document.getElementById('ahead-count').textContent = Math.max(0, state.queueNum - 5);
-  document.getElementById('est-wait').textContent = '~' + (Math.max(0, state.queueNum - 5) * 5);
+  fetch('submit-appointment.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bookingData),
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (!data.success) {
+        showToast(data.message || 'Unable to confirm booking.', 'error');
+        return;
+      }
 
-  // Appointment detail table
-  document.getElementById('appt-det-patient').textContent  = state.patient.name;
-  document.getElementById('appt-det-services').textContent = state.selectedServices.join(', ');
-  const dtLabel = new Date(datetime).toLocaleString('en-PH', { dateStyle: 'long', timeStyle: 'short' });
-  document.getElementById('appt-det-date').textContent = dtLabel;
-  document.getElementById('appt-det-queue').textContent = '#' + queueStr;
+      document.getElementById('my-queue-num').textContent = data.queue_number || '—';
+      document.getElementById('my-queue-type').textContent = data.services || '—';
+      document.getElementById('ahead-count').textContent = data.people_ahead ?? '—';
+      document.getElementById('est-wait').textContent = data.estimated_wait !== undefined ? '~' + data.estimated_wait : '—';
+      document.getElementById('total-today').textContent = data.total_today ?? '—';
+      document.getElementById('now-serving-info').textContent = data.now_serving ? '#' + data.now_serving.queue_number + ' — ' + data.now_serving.patient_name : '—';
+      document.getElementById('now-serving-service').textContent = data.now_serving ? data.now_serving.services : '—';
+      document.getElementById('up-next-val').textContent = data.up_next ? '#' + data.up_next.queue_number + ' — ' + data.up_next.patient_name : '—';
+      document.getElementById('appt-det-patient').textContent = state.patient.name;
+      document.getElementById('appt-det-services').textContent = data.services || state.selectedServices.join(', ');
+      document.getElementById('appt-det-date').textContent = data.preferred_date || new Date(preferredDate).toLocaleDateString('en-PH', { dateStyle: 'long' });
+      document.getElementById('appt-det-queue').textContent = '#' + (data.queue_number || '—');
+      document.getElementById('sms-phone-display').textContent = state.mobile;
 
-  showToast('Booking confirmed! Queue #' + queueStr, 'success');
-  goPatientStep(5);
+      showToast('Booking confirmed! Queue #' + data.queue_number, 'success');
+      goPatientStep(5);
+    })
+    .catch(() => {
+      showToast('Unable to confirm booking.', 'error');
+    });
 }
 
 function cancelQueue() {
@@ -323,14 +345,3 @@ document.addEventListener('DOMContentLoaded', () => {
   goPatientStep(0);
 });
 
-/* ─── Live Queue Simulation (landing page) ─── */
-let liveWaiting = 9, liveDone = 4, liveNow = 5;
-setInterval(() => {
-  const el = document.getElementById('ahead-count');
-  if (el && parseInt(el.textContent) > 0) {
-    el.textContent = Math.max(0, parseInt(el.textContent) - 1);
-    if (parseInt(el.textContent) === 0) {
-      document.getElementById('up-next-val').textContent = "You're next!";
-    }
-  }
-}, 10000);

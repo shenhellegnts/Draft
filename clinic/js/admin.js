@@ -5,30 +5,12 @@
 
 'use strict';
 
-/* ─── Auth guard ─── */
-(function() {
-  if (sessionStorage.getItem('admin_logged_in') !== '1') {
-    window.location.href = 'login.html';
-  }
-  const user = sessionStorage.getItem('admin_user') || 'admin';
-  const capUser = user.charAt(0).toUpperCase() + user.slice(1);
-  ['sidebar-avatar','admin-avatar-nav'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = capUser.charAt(0);
-  });
-  ['sidebar-username','admin-username-nav'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = capUser;
-  });
-})();
-
 /* ─── Date header ─── */
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('dashboard-date');
   if (el) {
     el.textContent = new Date().toLocaleDateString('en-PH', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   }
-  renderQueue();
 });
 
 /* ─── Section switching ─── */
@@ -91,140 +73,50 @@ function showToast(msg, type = 'default') {
 }
 
 /* ─── Queue system ─── */
-const queueData = {
-  serving: { num: '005', name: 'Mark Villanueva', service: 'CBC Screening' },
-  waiting: [
-    { num: '006', name: 'Ana Reyes', service: 'Urinalysis, Fecalysis' },
-    { num: '007', name: 'Franz Mendoza', service: 'Physical Exam, ECG' },
-    { num: '008', name: 'Shamilelle Quantas', service: 'Hepatitis AB Screening' },
-    { num: '009', name: 'Paulo Mendoza', service: 'Drug Test' },
-    { num: '010', name: 'Maria Garcia', service: 'Basic 5 Package' },
-  ],
-  done: [
-    { num: '001', name: 'Jose Rivera', service: 'Urinalysis' },
-    { num: '002', name: 'Andrea Bautista', service: 'Basic 5 Package' },
-    { num: '003', name: 'Carmen dela Rosa', service: 'CBC Screening' },
-    { num: '004', name: 'Lisa Reyes', service: 'Chest X-Ray' },
-  ],
-};
-
-function renderQueue() {
-  // Now serving
-  const s = queueData.serving;
-  if (s) {
-    document.getElementById('q-now-num').textContent = '#' + s.num;
-    document.getElementById('q-now-name').textContent = s.name;
-    document.getElementById('q-now-service').textContent = s.service;
-  }
-
-  // Waiting list
-  const list = document.getElementById('queue-list');
-  const empty = document.getElementById('empty-queue');
-  const countLabel = document.getElementById('waiting-count-label');
-
-  if (!list) return;
-
-  if (queueData.waiting.length === 0) {
-    list.innerHTML = '';
-    if (empty) empty.style.display = 'block';
-    if (countLabel) countLabel.textContent = '— queue is empty';
-  } else {
-    if (empty) empty.style.display = 'none';
-    if (countLabel) countLabel.textContent = `— ${queueData.waiting.length} patient${queueData.waiting.length !== 1 ? 's' : ''} waiting`;
-
-    const colors = ['#6366f1','#f59e0b','#ec4899','#10b981','#3b82f6','#8b5cf6'];
-    list.innerHTML = queueData.waiting.map((p, i) => `
-      <div class="queue-list-item">
-        <div class="queue-num-badge">#${p.num}</div>
-        <div class="queue-item-info">
-          <div class="queue-item-name">${p.name}</div>
-          <div class="queue-item-service">${p.service}</div>
-        </div>
-        <span class="tag orange">Waiting</span>
-      </div>
-    `).join('');
-  }
-
-  // Update badge
+function updateQueueWidgets() {
+  const waitingCount = document.querySelectorAll('#queue-list .queue-list-item').length;
   const badge = document.getElementById('queue-badge');
-  if (badge) badge.textContent = queueData.waiting.length;
-
-  // Done list
-  const doneList = document.getElementById('done-list');
-  if (doneList) {
-    doneList.innerHTML = queueData.done.map(p => `
-      <div class="queue-list-item">
-        <div class="queue-num-badge" style="background:#dcfce7;color:#16a34a;">#${p.num}</div>
-        <div class="queue-item-info">
-          <div class="queue-item-name">${p.name}</div>
-          <div class="queue-item-service">${p.service}</div>
-        </div>
-        <span class="tag gray">Done</span>
-      </div>
-    `).join('');
-  }
-
-  // Update SMS manual dropdown
-  const sel = document.getElementById('manual-sms-patient');
-  if (sel) {
-    sel.innerHTML = [queueData.serving, ...queueData.waiting].map(p =>
-      `<option>${p.name} (#${p.num})</option>`
-    ).join('');
-  }
+  if (badge) badge.textContent = waitingCount;
 }
 
 function callNextPatient() {
-  if (!queueData.serving) {
-    showToast('No patient is currently being served.', 'error');
-    return;
-  }
-  const done = queueData.serving;
-  queueData.done.push({ ...done });
-  addSMSLog(done);
-
-  if (queueData.waiting.length > 0) {
-    queueData.serving = queueData.waiting.shift();
-    showToast(`✓ ${done.name} marked done. Now calling #${queueData.serving.num} — ${queueData.serving.name}`, 'success');
-  } else {
-    queueData.serving = null;
-    document.getElementById('q-now-num').textContent = '—';
-    document.getElementById('q-now-name').textContent = 'Queue is empty';
-    document.getElementById('q-now-service').textContent = '';
-    showToast(`✓ ${done.name} marked done. Queue is now empty.`, 'success');
-  }
-  renderQueue();
+  fetch('queue-action.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'done' })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.success) {
+      showToast(data.message || 'Unable to advance the queue.', 'error');
+      return;
+    }
+    showToast('Patient marked done. Calling next patient.', 'success');
+    setTimeout(() => window.location.reload(), 300);
+  })
+  .catch(() => showToast('Unable to advance the queue.', 'error'));
 }
 
 function skipCurrent() {
-  if (!queueData.serving) return;
-  const skipped = queueData.serving;
-  if (queueData.waiting.length > 0) {
-    queueData.serving = queueData.waiting.shift();
-    queueData.waiting.push(skipped); // put skipped at end
-    showToast(`Skipped #${skipped.num}. Now serving #${queueData.serving.num}.`, 'default');
-    renderQueue();
-  } else {
-    showToast('No next patient to skip to.', 'error');
-  }
+  fetch('queue-action.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'skip' })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.success) {
+      showToast(data.message || 'Unable to skip the current patient.', 'error');
+      return;
+    }
+    showToast('Current patient moved to end of queue.', 'success');
+    setTimeout(() => window.location.reload(), 300);
+  })
+  .catch(() => showToast('Unable to skip the current patient.', 'error'));
 }
 
 function resetQueueDemo() {
-  queueData.serving = { num: '005', name: 'Mark Villanueva', service: 'CBC Screening' };
-  queueData.waiting = [
-    { num: '006', name: 'Ana Reyes', service: 'Urinalysis, Fecalysis' },
-    { num: '007', name: 'Franz Mendoza', service: 'Physical Exam, ECG' },
-    { num: '008', name: 'Shamilelle Quantas', service: 'Hepatitis AB Screening' },
-    { num: '009', name: 'Paulo Mendoza', service: 'Drug Test' },
-    { num: '010', name: 'Maria Garcia', service: 'Basic 5 Package' },
-  ];
-  queueData.done = [
-    { num: '001', name: 'Jose Rivera', service: 'Urinalysis' },
-    { num: '002', name: 'Andrea Bautista', service: 'Basic 5 Package' },
-    { num: '003', name: 'Carmen dela Rosa', service: 'CBC Screening' },
-    { num: '004', name: 'Lisa Reyes', service: 'Chest X-Ray' },
-  ];
-  renderQueue();
-  showToast('Queue demo reset.', 'default');
+  showToast('Reset is not available when using live database data.', 'default');
 }
 
 /* ─── SMS Log ─── */
@@ -254,10 +146,26 @@ function addSMSLog(patient) {
   document.getElementById('sms-sent-count').textContent = smsSentCount;
 }
 
-function saveTemplate() { showToast('SMS template saved.', 'success'); }
+function saveTemplate() {
+  const t = document.getElementById('sms-template')?.value || '';
+  fetch('save-settings.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ setting_key: 'sms_template', setting_value: t })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      showToast('SMS template saved successfully.', 'success');
+    } else {
+      showToast('Unable to save SMS template.', 'error');
+    }
+  })
+  .catch(() => showToast('Unable to save SMS template.', 'error'));
+}
 function previewSMS() {
   const t = document.getElementById('sms-template')?.value || '';
-  const preview = t.replace('[Patient Name]', 'Mark Villanueva').replace('[Queue #]', '#005');
+  const preview = t.replace('[Patient Name]', 'Patient Name').replace('[Queue #]', '#005');
   alert('SMS Preview:\n\n' + preview);
 }
 function sendManualSMS() {
@@ -279,34 +187,50 @@ function filterAppts(btn, status) {
   });
 }
 
-function approveAppt(btn) {
-  const row = btn.closest('tr');
-  const statusCell = row.querySelector('.tag');
-  if (statusCell) {
-    statusCell.className = 'tag blue';
-    statusCell.textContent = 'Confirmed';
-    row.setAttribute('data-status', 'confirmed');
-  }
-  const actionsCell = row.querySelector('td:last-child');
-  if (actionsCell) {
-    actionsCell.innerHTML = '<button class="action-btn">Edit</button> <button class="btn btn-sm btn-danger" onclick="cancelAppt(this)">Cancel</button>';
-  }
-  showToast('Appointment approved!', 'success');
+function filterApptsSearch(query) {
+  const rows = document.querySelectorAll('#appt-table-body tr');
+  const q = query.toLowerCase();
+  rows.forEach(row => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = text.includes(q) ? '' : 'none';
+  });
 }
 
-function cancelAppt(btn) {
-  if (confirm('Cancel this appointment?')) {
-    const row = btn.closest('tr');
-    const statusCell = row.querySelector('.tag');
-    if (statusCell) {
-      statusCell.className = 'tag red';
-      statusCell.textContent = 'Cancelled';
-      row.setAttribute('data-status', 'cancelled');
+function approveAppt(btn, appointmentId) {
+  fetch('appointment-action.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'approve', appointment_id: appointmentId })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.success) {
+      showToast(data.message || 'Unable to approve appointment.', 'error');
+      return;
     }
-    const actionsCell = row.querySelector('td:last-child');
-    if (actionsCell) actionsCell.innerHTML = '<button class="action-btn">View</button>';
+    showToast('Appointment approved.', 'success');
+    setTimeout(() => window.location.reload(), 300);
+  })
+  .catch(() => showToast('Unable to approve appointment.', 'error'));
+}
+
+function cancelAppt(btn, appointmentId) {
+  if (!confirm('Cancel this appointment?')) return;
+  fetch('appointment-action.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'cancel', appointment_id: appointmentId })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.success) {
+      showToast(data.message || 'Unable to cancel appointment.', 'error');
+      return;
+    }
     showToast('Appointment cancelled.', 'default');
-  }
+    setTimeout(() => window.location.reload(), 300);
+  })
+  .catch(() => showToast('Unable to cancel appointment.', 'error'));
 }
 
 /* ─── Patient search ─── */
@@ -331,8 +255,6 @@ function openAddService() {
 /* ─── Logout ─── */
 function adminLogout() {
   if (confirm('Sign out of admin panel?')) {
-    sessionStorage.removeItem('admin_logged_in');
-    sessionStorage.removeItem('admin_user');
-    window.location.href = 'login.html';
+    window.location.href = 'logout.php';
   }
 }
