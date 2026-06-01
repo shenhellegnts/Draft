@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<style>
+  body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #222; margin: 72pt; line-height: 1.5; }
+  h1 { font-size: 22pt; color: #1a3a5c; text-align: center; border-bottom: 3px solid #1a3a5c; padding-bottom: 6pt; }
+  h2 { font-size: 16pt; color: #1a3a5c; border-bottom: 1.5px solid #aac; margin-top: 24pt; }
+  h3 { font-size: 13pt; color: #2c5f8a; margin-top: 14pt; }
+  h4 { font-size: 11pt; color: #444; margin-top: 10pt; }
+  p  { margin: 4pt 0 8pt 0; }
+  code, pre { font-family: Consolas, "Courier New", monospace; font-size: 9.5pt; background: #f4f6f8; padding: 2pt 5pt; border-radius: 3pt; }
+  pre { display: block; padding: 8pt 12pt; margin: 8pt 0; border-left: 4px solid #2c5f8a; white-space: pre-wrap; }
+  table { border-collapse: collapse; width: 100%; margin: 10pt 0; font-size: 10pt; }
+  th { background: #1a3a5c; color: #fff; padding: 6pt 8pt; text-align: left; }
+  td { border: 1px solid #ccc; padding: 5pt 8pt; }
+  tr:nth-child(even) td { background: #f0f4f8; }
+  .label { font-weight: bold; color: #1a3a5c; }
+  .box { border: 1px solid #2c5f8a; background: #eef4fb; padding: 8pt 12pt; margin: 10pt 0; border-radius: 4pt; }
+  .script-box { border: 1px solid #888; background: #fafafa; padding: 10pt 14pt; margin: 10pt 0; font-style: italic; border-radius: 4pt; }
+  .center { text-align: center; }
+  .page-break { page-break-before: always; }
+  ul, ol { margin: 4pt 0 8pt 18pt; }
+  li { margin-bottom: 3pt; }
+  .subtitle { text-align: center; font-size: 13pt; color: #555; margin-top: 4pt; }
+  .meta { text-align: center; font-size: 10pt; color: #888; margin-top: 4pt; }
+  .flow-step { background: #eef4fb; border-left: 4px solid #2c5f8a; padding: 6pt 10pt; margin: 5pt 0; }
+</style>
+</head>
+<body>
+
+<h1>M.V. Masangkay Clinic</h1>
+<p class="subtitle">Online Appointment &amp; Queue Management System</p>
+<p class="subtitle">Technical Documentation &amp; Thesis Presentation Script</p>
+<p class="meta">Prepared by: Shenhelle Ashley Guantes &nbsp;|&nbsp; 2026</p>
+<br/><br/>
+<div class="box">
+  <b>System Purpose:</b> A web-based clinic management system that allows patients to book
+  appointments online with OTP verification, and provides clinic staff with a real-time
+  queue control dashboard, SMS notifications, patient records, and analytics.
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2>1. Complete System Flow</h2>
+
+<h3>1.1 Patient Booking Flow</h3>
+<div class="flow-step"><b>Step 1 — Mobile &amp; OTP:</b> Patient enters 10-digit mobile → OTP sent via SkySMS → Patient enters 6-digit code → Server validates via session.</div>
+<div class="flow-step"><b>Step 2 — Profile:</b> System checks if mobile exists in DB. Existing patients see their saved profiles. New patients fill in the form.</div>
+<div class="flow-step"><b>Step 3 — Medical History:</b> Patient fills symptoms, conditions, hereditary diseases, lifestyle info. Saved as JSON.</div>
+<div class="flow-step"><b>Step 4 — Services &amp; Date:</b> Patient selects lab tests. Picks appointment date — Sundays and PH holidays are blocked.</div>
+<div class="flow-step"><b>Step 5 — Submission:</b> Booking saved as pending. Patient sees pending screen. System polls every 8 seconds.</div>
+<div class="flow-step"><b>Step 6 — Approval:</b> Admin approves → queue number assigned → SMS sent → patient screen automatically updates to show queue number.</div>
+
+<h3>1.2 Admin Queue Flow</h3>
+<div class="flow-step"><b>Step 1:</b> Admin sees Appointments tab badge showing pending count for the selected date. Future bookings are visible by navigating the date picker.</div>
+<div class="flow-step"><b>Step 2:</b> Admin reviews medical history modal → Approves or Rejects → SMS sent automatically.</div>
+<div class="flow-step"><b>Step 3:</b> On appointment day — Queue Control tab shows waiting list (priority patients first).</div>
+<div class="flow-step"><b>Step 4:</b> Admin clicks Call Next → previous patient marked done → next patient set to in_progress → SMS sent.</div>
+<div class="flow-step"><b>Step 5:</b> Absent patients can be skipped and reinserted. Priority patients can be moved to the front.</div>
+<div class="flow-step"><b>Step 6 — End of Day (5 PM):</b> Any remaining skipped appointments are auto-marked as disregarded.</div>
+
+<h3>1.3 Appointment Status Lifecycle</h3>
+<table>
+  <tr><th>Status</th><th>Description</th><th>Triggered By</th></tr>
+  <tr><td>pending</td><td>Newly submitted, awaiting admin review</td><td>Patient submits booking</td></tr>
+  <tr><td>confirmed</td><td>Approved, queue number assigned</td><td>Admin approves</td></tr>
+  <tr><td>in_progress</td><td>Currently being served (Now Serving)</td><td>Admin calls next</td></tr>
+  <tr><td>done</td><td>Service completed</td><td>Admin calls next or marks done</td></tr>
+  <tr><td>rejected</td><td>Admin declined</td><td>Admin rejects</td></tr>
+  <tr><td>cancelled</td><td>Appointment cancelled</td><td>Admin cancels</td></tr>
+  <tr><td>skipped</td><td>Patient absent when called</td><td>Admin skips</td></tr>
+  <tr><td>disregarded</td><td>Skipped, not reinserted by 5 PM</td><td>Automatic daily job</td></tr>
+</table>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2>2. Queue Logic &amp; Detailed Example</h2>
+
+<h3>2.1 How the Queue Works</h3>
+
+<h4>Call Next</h4>
+<ol>
+  <li>If a patient is currently <b>Now Serving</b> (<code>in_progress</code>) → marks them as <code>done</code>.</li>
+  <li>Fetches the next patient from <code>confirmed</code> status for today using this ORDER BY:
+    <pre>ORDER BY
+  CASE WHEN priority_flags IS NOT NULL AND priority_flags != '' THEN 0 ELSE 1 END,
+  created_at ASC</pre>
+    <b>Priority patients (Senior, Pregnant, PWD) always go first.</b> Within each group, earliest booking time (FIFO).
+  </li>
+  <li>Sets that patient to <code>in_progress</code> → sends SMS notification.</li>
+</ol>
+
+<h4>Skip</h4>
+<ol>
+  <li>If a patient is <b>Now Serving</b> → moves them from <code>in_progress</code> to <code>skipped</code>.</li>
+  <li>If no one is being served → moves the target appointment from <code>confirmed</code> or <code>in_progress</code> to <code>skipped</code>.</li>
+  <li>Skipped patients appear in the <b>Skipped</b> section and can be reinserted.</li>
+  <li>At <b>5:00 PM</b> — all remaining skipped appointments are auto-marked <code>disregarded</code>.</li>
+</ol>
+
+<h4>Reinsert (from Skipped back to Queue)</h4>
+<ol>
+  <li>Changes patient status from <code>skipped</code> back to <code>confirmed</code>.</li>
+  <li>Patient returns to the waiting queue at their <b>original booking time position</b> (natural FIFO — not moved to front).</li>
+  <li>If they have a priority flag, they go before non-priority patients as normal.</li>
+</ol>
+
+<h4>Priority Insert (Move to Front)</h4>
+<ol>
+  <li>Sets the patient's <code>created_at</code> to <code>TODAY 00:00:01</code>.</li>
+  <li>Since the queue orders by <code>created_at ASC</code>, this pushes them to the <b>front of their group</b>.</li>
+  <li>If the patient has <b>no priority flag</b>, they go to the front of the regular (non-flagged) group — still behind any flagged patients.</li>
+</ol>
+
+<h3>2.2 Concrete Queue Example</h3>
+
+<h4>Initial Queue — 9:00 AM (5 patients approved)</h4>
+<table>
+  <tr><th>Queue #</th><th>Patient</th><th>Priority</th><th>Booked At</th><th>Status</th></tr>
+  <tr><td>#001</td><td>Juan dela Cruz</td><td>—</td><td>8:00 AM</td><td>confirmed</td></tr>
+  <tr><td>#002</td><td>Maria Santos</td><td>Senior</td><td>8:05 AM</td><td>confirmed</td></tr>
+  <tr><td>#003</td><td>Pedro Reyes</td><td>—</td><td>8:10 AM</td><td>confirmed</td></tr>
+  <tr><td>#004</td><td>Ana Garcia</td><td>PWD</td><td>8:15 AM</td><td>confirmed</td></tr>
+  <tr><td>#005</td><td>Jose Ramos</td><td>—</td><td>8:20 AM</td><td>confirmed</td></tr>
+</table>
+
+<h4>Step 1 — Admin clicks "Call Next"</h4>
+<p>Priority patients: Maria (#002 Senior) and Ana (#004 PWD). Maria booked earlier → she goes first.</p>
+<div class="flow-step"><b>Now Serving:</b> #002 Maria Santos (Senior) → SMS sent<br/>Waiting: #004 Ana (PWD), #001 Juan, #003 Pedro, #005 Jose</div>
+
+<h4>Step 2 — Admin clicks "Skip" on Maria (she didn't show up)</h4>
+<p>Maria moves from <code>in_progress</code> → <code>skipped</code>.</p>
+<div class="flow-step"><b>Now Serving:</b> — (empty)<br/><b>Skipped:</b> #002 Maria Santos<br/>Waiting: #004 Ana (PWD), #001 Juan, #003 Pedro, #005 Jose</div>
+
+<h4>Step 3 — Admin clicks "Call Next"</h4>
+<p>Next priority patient: Ana Garcia (#004 PWD).</p>
+<div class="flow-step"><b>Now Serving:</b> #004 Ana Garcia (PWD) → SMS sent<br/>Waiting: #001 Juan, #003 Pedro, #005 Jose</div>
+
+<h4>Step 4 — Admin clicks "⬆ Priority" on Juan (#001)</h4>
+<p>Juan has no priority flag. His <code>created_at</code> is set to <code>TODAY 00:00:01</code>. He moves to the front of the non-priority group.</p>
+<div class="flow-step"><b>Waiting order:</b> #001 Juan (forced front), #003 Pedro, #005 Jose</div>
+
+<h4>Step 5 — Maria arrives — Admin clicks "↩ Reinsert"</h4>
+<p>Maria's status returns to <code>confirmed</code>. Her original <code>created_at</code> = 8:05 AM. She has Senior flag → goes before all non-priority patients.</p>
+<div class="flow-step"><b>Waiting order:</b> #002 Maria (Senior), #001 Juan, #003 Pedro, #005 Jose</div>
+
+<h4>Step 6 — Admin calls next: Maria → Juan → Pedro → done</h4>
+<p>Each patient is called, served, marked done, next SMS sent.</p>
+
+<h4>Step 7 — Jose was skipped and never came back — 5:00 PM</h4>
+<p>The system auto-runs: <code>UPDATE appointments SET status='disregarded' WHERE status='skipped' AND DATE(preferred_date)=today</code></p>
+<div class="flow-step"><b>Jose Ramos → status: disregarded</b> (closed out automatically)</div>
+
+<h4>End of Day Summary</h4>
+<table>
+  <tr><th>Patient</th><th>Final Status</th><th>Reason</th></tr>
+  <tr><td>#001 Juan dela Cruz</td><td>done</td><td>Priority-inserted to front, then called and served</td></tr>
+  <tr><td>#002 Maria Santos</td><td>done</td><td>Skipped, reinserted when she arrived, then served</td></tr>
+  <tr><td>#003 Pedro Reyes</td><td>done</td><td>Called normally in FIFO order</td></tr>
+  <tr><td>#004 Ana Garcia</td><td>done</td><td>Priority (PWD) — called first</td></tr>
+  <tr><td>#005 Jose Ramos</td><td>disregarded</td><td>Skipped, did not return by 5 PM</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2>3. Thesis Presentation Script</h2>
+
+<div class="box"><b>Note:</b> Estimated delivery time: 15–18 minutes. Adapt naturally during presentation.</div>
+
+<h3>Opening (1 minute)</h3>
+<div class="script-box">
+  <p>"Good morning/afternoon, panel members and guests. We are presenting our thesis titled
+  <b>M.V. Masangkay Clinic Online Appointment and Queue Management System</b> — a web-based
+  solution designed to modernize the appointment and queue process of M.V. Masangkay Clinic,
+  an X-ray and laboratory clinic in our community."</p>
+  <p>"Currently, the clinic relies on manual walk-in queuing, which often results in long
+  waiting times, overcrowding, and missed appointments. Our system addresses these problems
+  by allowing patients to book appointments online and enabling clinic staff to manage the
+  queue digitally in real time."</p>
+</div>
+
+<h3>Problem Statement (1 minute)</h3>
+<div class="script-box">
+  <p>"Before this system, patients had no way to know how long they would wait. They would
+  come to the clinic, take a number, and stay for hours without updates. Staff also had
+  no centralized way to track patient information, medical history, or service requests."</p>
+  <p>"Our system solves three core problems: <b>first</b>, the lack of online appointment booking;
+  <b>second</b>, the absence of a digital queue management tool for clinic staff; and
+  <b>third</b>, no automated SMS notification system to keep patients informed of their status."</p>
+</div>
+
+<h3>System Overview (2 minutes)</h3>
+<div class="script-box">
+  <p>"The system has two main interfaces: the <b>Patient Portal</b> and the <b>Admin Dashboard</b>."</p>
+  <p>"The Patient Portal is a glassmorphic, mobile-friendly web application accessible
+  at the clinic's public URL. Patients go through a step-by-step booking process:
+  they verify their identity using OTP, fill in their profile and medical history,
+  select services, and choose an appointment date."</p>
+  <p>"The Admin Dashboard is a secure, role-protected panel where clinic staff can
+  review and approve pending appointments, manage the live queue, send manual SMS
+  messages, view patient records, and monitor analytics."</p>
+  <p>"The system is built using <b>PHP</b> for the backend, <b>MySQL</b> for the database,
+  and vanilla <b>JavaScript</b> with a modern glassmorphic CSS design for the frontend.
+  SMS notifications are powered by <b>SkySMS</b>, a Philippine SMS gateway."</p>
+</div>
+
+<h3>Key Features (3 minutes)</h3>
+<div class="script-box">
+  <p><b>Feature 1 — OTP Verification.</b>
+  When a patient enters their mobile number, a 6-digit One-Time Password is sent via SMS.
+  The OTP is valid for 5 minutes. If the patient requests a resend within that window,
+  the same code is resent — no new SMS is wasted, and the patient is not confused
+  by receiving a different code."</p>
+
+  <p><b>Feature 2 — Patient Profile Management.</b>
+  The system recognizes returning patients by their mobile number and pre-fills their
+  saved profile. Multiple family members can be registered under one mobile using the
+  'Book for Another Person' option."</p>
+
+  <p><b>Feature 3 — Medical History Collection.</b>
+  Each booking includes a structured medical history form covering current symptoms,
+  chronic conditions, hereditary diseases, past surgeries, allergies, and lifestyle
+  information — giving the clinic a complete clinical picture before the visit."</p>
+
+  <p><b>Feature 4 — Smart Queue Management.</b>
+  Approved appointments are assigned sequential queue numbers per day. The queue
+  automatically prioritizes patients with senior citizen, pregnant, or PWD flags,
+  placing them ahead of regular patients."</p>
+
+  <p><b>Feature 5 — Automatic SMS Notifications.</b>
+  Patients receive SMS when: their appointment is approved with queue number, when they
+  are called at the clinic, or when their appointment is rejected. Staff can also send
+  manual SMS to any patient in the queue."</p>
+
+  <p><b>Feature 6 — Calendar and Holiday Blocking.</b>
+  The appointment date picker blocks Sundays and Philippine public holidays on both
+  the patient portal and admin date filters — preventing bookings on non-operating days."</p>
+
+  <p><b>Feature 7 — Analytics and CSV Export.</b>
+  The analytics tab provides weekly patient volume charts, top services, and income
+  summaries. The patient registry can be exported to Excel-ready CSV with correct
+  mobile number formatting."</p>
+
+  <p><b>Feature 8 — 7 AM Queue Reminder SMS.</b>
+  Every morning at 7 AM, before the clinic opens, the system automatically sends
+  a reminder SMS to the top 5 patients in today's confirmed queue. This ensures patients
+  are reminded to come on time and reduces no-shows. Only the top 5 are notified
+  to conserve SMS credits."</p>
+
+  <p><b>Feature 9 — 5 PM Auto-Disregard.</b>
+  At 5:00 PM, the system automatically marks all skipped appointments for the day
+  as 'disregarded.' This closes out the day's queue cleanly without requiring
+  manual action from the staff."</p>
+
+  <p><b>Feature 10 — Real-Time Queue Updates.</b>
+  After a patient submits their booking, their phone screen automatically updates
+  every 8 seconds. When the admin approves the appointment, the patient's screen
+  instantly shows their queue number and how many patients are ahead — along with
+  an estimated waiting time — without any page reload."</p>
+</div>
+
+<h3>System Flow Demonstration (3 minutes)</h3>
+<div class="script-box">
+  <p>"Let me walk through the complete flow of the system."</p>
+  <p>"A patient visits our website and clicks Book Appointment. They enter their 10-digit
+  Philippine mobile number. The system sends a 6-digit OTP. Once verified, the patient
+  fills in their profile, medical history, selects laboratory services, and picks their
+  preferred appointment date — only weekdays and non-holidays are available."</p>
+  <p>"The booking appears instantly in the Admin Dashboard under Appointments with a Pending
+  status. The sidebar badge shows the pending count for the selected date — including
+  future dates — so the admin can navigate to any date and review future bookings."</p>
+  <p>"The admin reviews the patient's medical history in the detail modal and approves.
+  Queue number 001 is assigned. The patient receives an SMS: 'Your appointment has been
+  approved. Your queue number is #001.'"</p>
+  <p>"On the appointment day, the admin opens Queue Control. The patient appears in the
+  Waiting list. Clicking Call Next marks the previous patient as done, sets this patient
+  to Now Serving, and sends an SMS in Filipino: 'Maari na po kayong pumunta sa
+  M.V. Masangkay Clinic dahil malapit na po ang inyong turn.'"</p>
+  <p>"On the patient's phone, the booking page automatically updated from Pending to Approved
+  — showing the queue number — without any page refresh, thanks to our 8-second
+  real-time status polling."</p>
+</div>
+
+<h3>Technical Highlights (2 minutes)</h3>
+<div class="script-box">
+  <p><b>Security:</b> All database queries use prepared statements to prevent SQL injection.
+  OTP verification uses constant-time comparison via <code>hash_equals()</code> to prevent
+  timing attacks. Admin passwords are bcrypt-hashed. Session-based authentication
+  protects all admin endpoints."</p>
+
+  <p><b>Timezone Accuracy:</b> The system sets Philippine Standard Time (Asia/Manila, UTC+8)
+  globally so all date filtering — queue, appointments, SMS logs — is always based on
+  Philippine time, not the server's default UTC."</p>
+
+  <p><b>Priority Queue Algorithm:</b> The queue sorts by two criteria: first, whether the patient
+  has a priority flag (senior, pregnant, PWD); second, by booking time (first come,
+  first served). Vulnerable patients are always served first."</p>
+
+  <p><b>Single Page Architecture:</b> Both portals are single-page applications with JavaScript
+  step navigation, reducing page reloads and providing a smooth, app-like experience."</p>
+</div>
+
+<h3>Conclusion (1 minute)</h3>
+<div class="script-box">
+  <p>"In conclusion, our M.V. Masangkay Clinic Appointment and Queue Management System
+  successfully addresses the clinic's operational challenges through a fully functional
+  web application deployed at <b>mvmasankayclinic.xo.je</b>."</p>
+  <p>"The system reduces patient waiting time, improves queue transparency through
+  real-time SMS notifications, and gives clinic staff a centralized digital tool
+  for daily operations, patient records, and analytics."</p>
+  <p>"We are now open to questions from the panel. Thank you."</p>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2>4. Key Features &amp; Automated Processes</h2>
+
+<h3>3.1 7 AM Queue Reminder — sms-cron.php</h3>
+<div class="box">
+  <b>Purpose:</b> A scheduled cron job that runs every morning at <b>7:00 AM</b> before the clinic opens.
+  It automatically sends a reminder SMS to the <b>top 5 patients</b> in today's confirmed queue.
+</div>
+<ul>
+  <li>Queries appointments with <code>status IN ('confirmed', 'in_progress')</code> and <code>DATE(preferred_date) = today</code>.</li>
+  <li>Orders by queue number and takes the first <b>5 records</b> (LIMIT 5).</li>
+  <li>Sends reminder SMS in Filipino to each patient.</li>
+  <li>Results logged in <code>sms_logs</code> with <code>sms_type = 'called'</code>.</li>
+</ul>
+<p><b>Cron URL:</b> <code>https://mvmasankayclinic.xo.je/admin/sms-cron.php</code></p>
+<p><b>Schedule:</b> Hour 23 UTC = 7 AM PH time (UTC+8)</p>
+
+<h3>3.2 5 PM Auto-Disregard</h3>
+<div class="box">
+  <b>Purpose:</b> At 5:00 PM, the system automatically marks all skipped appointments as disregarded, closing out the day's queue cleanly.
+</div>
+<ul>
+  <li>Triggered on every admin dashboard page load after 5:00 PM.</li>
+  <li>Checks: <code>if (intval(date('H')) >= 17)</code></li>
+  <li>Only affects today's skipped appointments — does not touch future dates.</li>
+</ul>
+
+<h3>3.3 Real-Time Status Polling — 8-Second Interval</h3>
+<div class="box">
+  <b>Purpose:</b> After booking, the patient portal checks for status updates every 8 seconds. When approved, the screen updates automatically without page refresh.
+</div>
+<ul>
+  <li><code>startStatusPolling(appointment_id)</code> calls <code>check-appointment-status.php</code> every 8 seconds.</li>
+  <li>On <code>confirmed</code>: displays queue number, people ahead, and estimated wait time.</li>
+  <li>On <code>rejected</code>: shows rejection screen.</li>
+  <li>Queue state saved in <code>localStorage</code> — survives page refresh.</li>
+  <li>Estimated wait = people_ahead × 5 minutes.</li>
+</ul>
+
+<h3>3.4 Priority Queue System (Senior / Pregnant / PWD)</h3>
+<div class="box">
+  <b>Purpose:</b> Priority patients are automatically placed ahead of regular patients regardless of booking time.
+</div>
+<ul>
+  <li>Patient selects priority pills during booking: Senior Citizen, Pregnant, PWD.</li>
+  <li>Stored in <code>appointments.priority_flags</code> as comma-separated values.</li>
+  <li>Queue order: Priority patients first → then FIFO by <code>created_at</code>.</li>
+</ul>
+<pre>ORDER BY
+  CASE WHEN priority_flags IS NOT NULL AND priority_flags != '' THEN 0 ELSE 1 END,
+  created_at ASC</pre>
+
+<h3>3.5 OTP Reuse Within 5-Minute Window</h3>
+<div class="box">
+  <b>Purpose:</b> If a patient requests OTP resend within 5 minutes, the same code is resent instead of generating a new one — preventing patient confusion.
+</div>
+<ul>
+  <li>If valid OTP exists in session for same mobile → resend same code, expiry unchanged.</li>
+  <li>If expired or different mobile → generate new code, reset 5-minute timer.</li>
+  <li>OTP not cleared after verification — valid until natural expiry.</li>
+</ul>
+
+<h3>3.6 Holiday &amp; Sunday Blocking</h3>
+<div class="box">
+  <b>Purpose:</b> Prevents bookings and admin navigation on non-operating days.
+</div>
+<ul>
+  <li><b>Patient portal:</b> <code>validateAppointmentDate()</code> blocks Sundays and PH holidays — clears input and shows error toast.</li>
+  <li><b>Admin dashboard:</b> <code>adminDateSafe(input, callback)</code> applied to all 3 date filters (Appointments, Patients, Analytics).</li>
+  <li>Covers fixed holidays (New Year, Labor Day, Christmas, etc.) and moveable holidays (Holy Week, Eid, National Heroes Day) for 2025–2026.</li>
+</ul>
+
+<h3>3.7 Mobile Number Auto-Formatting</h3>
+<ul>
+  <li>Strips non-digit characters on input.</li>
+  <li>Removes leading <code>0</code> or <code>63</code> prefix automatically.</li>
+  <li>Formats as <code>9XX XXX XXXX</code> with spaces.</li>
+  <li>Validates: exactly 10 digits starting with <code>9</code>.</li>
+</ul>
+
+<h3>3.8 Patient Data CSV Export</h3>
+<ul>
+  <li>Reads patient rows from the live DOM table — no server request needed.</li>
+  <li>Mobile formatted as <code>+63XXXXXXXXX</code> with tab prefix to prevent Excel scientific notation.</li>
+  <li>UTF-8 BOM included for correct Filipino character rendering in Excel.</li>
+  <li>Downloaded as: <code>patients_YYYY-MM-DD.csv</code></li>
+</ul>
+
+<h3>3.9 Queue State Persistence (localStorage)</h3>
+<ul>
+  <li><code>saveQueueToStorage(appointment_id)</code> saves ID and mobile after booking.</li>
+  <li><code>restoreQueueState()</code> on page load checks localStorage and restores screen.</li>
+  <li>If approved: queue number and people-ahead count restored automatically.</li>
+  <li>If rejected: rejection screen shown.</li>
+</ul>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2>5. Possible Panel Questions &amp; Answers</h2>
+<div class="box"><b>Note:</b> Practice these answers aloud before the defense. Keep answers under 1 minute each.</div>
+
+<h3>Q: Why did you choose PHP instead of a modern framework like Laravel or Node.js?</h3>
+<div class="script-box">
+  "PHP was chosen because it is the most widely supported language on shared hosting platforms like InfinityFree, which our clinic uses for deployment. It requires no additional setup, runs on any standard web server with XAMPP locally, and the team has direct experience with it. For the scope of this system — a single-clinic appointment and queue management tool — vanilla PHP with prepared statements provides everything we need without the overhead of a full framework."
+</div>
+
+<h3>Q: Why SkySMS instead of Twilio?</h3>
+<div class="script-box">
+  "We initially configured Twilio but discovered that US local numbers cannot send SMS to Philippine (+63) numbers without a multi-week carrier registration process. SkySMS is a Philippine-built SMS gateway specifically designed for local mobile numbers, making it the most practical solution. It also has lower per-SMS costs for Philippine numbers compared to international gateways."
+</div>
+
+<h3>Q: How secure is the OTP system?</h3>
+<div class="script-box">
+  "The OTP is generated using PHP's cryptographically secure <code>random_int()</code> function and stored server-side in the PHP session — never exposed to the client browser. It expires after 5 minutes. Verification uses <code>hash_equals()</code> for constant-time comparison to prevent timing attacks. The patient's mobile number must also match the session for verification to succeed, preventing replay attacks."
+</div>
+
+<h3>Q: What happens if the internet is unavailable during clinic operations?</h3>
+<div class="script-box">
+  "If the system is run locally on XAMPP within the clinic's local area network, it operates fully without external internet. Queue management, appointment approval, and patient records all function on the local network. Only SMS notifications and the live website would be unavailable — but the admin dashboard would still be accessible from within the clinic."
+</div>
+
+<h3>Q: Can the system handle multiple concurrent bookings?</h3>
+<div class="script-box">
+  "Yes. Queue number assignment uses a COUNT query per date and assigns the next sequential number atomically. All queries use prepared statements which ensure data integrity under concurrent requests. PHP sessions are completely isolated per user, so simultaneous bookings from different patients do not interfere with each other."
+</div>
+
+<h3>Q: What are the system's limitations?</h3>
+<div class="script-box">
+  "The main current limitations are: first, patients can select a date but not a specific time slot — all appointments for a given day compete in one queue. Second, the SMS gateway requires a paid subscription for API access beyond the free tier. Third, the system supports only a single clinic branch. Fourth, the admin queue requires a manual page refresh to update — it does not auto-refresh. These are all identified areas for future development."
+</div>
+
+<h3>Q: How does the priority queue system comply with Philippine law?</h3>
+<div class="script-box">
+  "Republic Act 9994 (Expanded Senior Citizens Act), RA 11861 (Expanded Solo Parents Act), and RA 7277 (Magna Carta for Disabled Persons) all mandate priority service for senior citizens, pregnant women, and PWDs in public establishments. Our system implements this through priority flags that automatically place these patients at the front of the queue, ensuring legal compliance and equitable healthcare access."
+</div>
+
+<h3>Q: How do you ensure data privacy under the Data Privacy Act of 2012 (RA 10173)?</h3>
+<div class="script-box">
+  "Patient data is protected through several mechanisms: all database queries use prepared statements to prevent unauthorized access, admin access is protected by session-based authentication with bcrypt-hashed passwords, the OTP system verifies patient identity before any data is shown, and sensitive credentials are stored in a git-ignored config file that is never committed to version control. The system collects only the minimum data needed for clinic operations."
+</div>
+
+<h3>Q: Why does the system collect medical history if this is just a queue system?</h3>
+<div class="script-box">
+  "The medical history collection serves two purposes. First, it allows the admin to make informed decisions when approving or rejecting appointments — for example, a patient with certain conditions may need to be seen earlier or referred elsewhere. Second, it reduces the time spent on intake forms at the clinic counter. The medical history is stored as structured JSON and is viewable only by authenticated admin staff."
+</div>
+
+<h3>Q: What is the difference between the preferred_date and created_at fields?</h3>
+<div class="script-box">
+  "<code>created_at</code> is when the patient submitted the booking — this is the booking timestamp. <code>preferred_date</code> is the actual appointment date the patient selected — when they want to visit the clinic. These can be different days. For example, a patient might book on June 1 for an appointment on June 5. The queue system operates on <code>preferred_date</code> so the clinic sees the correct patients each day."
+</div>
+
+<h3>Q: How does the system prevent fake or duplicate bookings?</h3>
+<div class="script-box">
+  "Every booking requires OTP verification through the patient's registered mobile number — this confirms the patient's identity before any booking is accepted. If a patient submits duplicate bookings, they all appear in the admin Appointments tab for review before approval. The admin reviews the medical history before approving, providing a human checkpoint for unusual or duplicate requests."
+</div>
+
+<h3>Q: What happens if the admin does not approve a booking before the appointment date?</h3>
+<div class="script-box">
+  "The appointment remains in <code>pending</code> status. On the patient's side, the booking screen continues to show 'Pending Review.' The patient will not receive a queue number and cannot join the queue until approved. The admin Appointments tab shows all pending bookings for any date, including past dates, so the admin can still approve or reject them after the fact."
+</div>
+
+<h3>Q: How scalable is the system if the clinic grows?</h3>
+<div class="script-box">
+  "For a single-branch clinic of this scale, the current architecture is sufficient. For larger scale, the identified improvements include: time slot selection to distribute patients across the day, multi-branch support with a branch_id column, and upgrading to a more robust hosting plan with dedicated resources. The use of prepared statements and indexed database queries ensures the system maintains performance even as patient records grow."
+</div>
+
+<h3>Q: How did you test the system?</h3>
+<div class="script-box">
+  "The system was tested through functional testing of each booking step, admin workflow testing covering appointment approval, queue operations, and SMS sending. We also tested edge cases such as expired OTPs, duplicate mobile numbers, priority patient ordering, and the 5 PM auto-disregard feature. The live deployment at mvmasankayclinic.xo.je was used for end-to-end testing with real SMS delivery."
+</div>
+
+<h3>Q: Why is the patient portal a single-page application instead of multiple pages?</h3>
+<div class="script-box">
+  "A single-page architecture was chosen to provide a smooth, app-like booking experience. Navigating between steps does not reload the page, which means patient data entered in earlier steps is preserved in JavaScript memory. It also reduces server load since only specific API calls are made at each step rather than full page reloads. The browser Back button is supported through the HTML5 History API so the experience feels natural."
+</div>
+
+<h3>Q: What is the role of the medical history in the approval process?</h3>
+<div class="script-box">
+  "The admin reviews the patient's medical history — including symptoms, chronic conditions, hereditary diseases, past surgeries, allergies, smoking and drinking habits — before approving or rejecting the appointment. This allows the clinic to prioritize urgent cases, identify patients who may need referral, and prepare the appropriate staff or equipment before the patient arrives. Review notes can also be added and are visible to the patient."
+</div>
+
+<h3>Q: What happens to a skipped patient if they arrive after being skipped?</h3>
+<div class="script-box">
+  "The admin can click the Reinsert button on the skipped patient in the Queue Control tab. This changes their status back to confirmed and places them back in the waiting queue at their original booking time position. If they have a priority flag (senior, pregnant, PWD), they will still be placed ahead of regular patients. If they are not reinserted by 5:00 PM, the system automatically marks them as disregarded to keep the queue data clean."
+</div>
+
+<h3>Q: How does the system ensure the queue is in the correct order?</h3>
+<div class="script-box">
+  "The queue order is determined by two criteria. First, priority patients — those flagged as senior citizen, pregnant, or PWD — are always placed before regular patients regardless of booking time. Second, within each group (priority and regular), patients are ordered by the time they booked (created_at ASC) — this is first come, first served. The Priority Insert feature allows the admin to manually push a confirmed patient to the front of their group by setting their created_at to the start of today."
+</div>
+
+<h3>Q: What if two priority patients book at the same time — who goes first?</h3>
+<div class="script-box">
+  "If two priority patients have the same created_at timestamp (which is extremely rare but possible), MySQL's natural row order would determine who goes first. In practice, since bookings come in through a web form, the created_at values are unique to the millisecond in most cases. If truly simultaneous, the admin can use Priority Insert to manually set the order."
+</div>
+
+<h3>Q: Why is the queue filtered by preferred_date instead of created_at?</h3>
+<div class="script-box">
+  "The queue is built around the day the patient wants to visit the clinic, not the day they booked. A patient might book three days in advance for a Tuesday appointment — their created_at would be Saturday but their preferred_date is Tuesday. The queue control must show Tuesday's patients on Tuesday, not Saturday's patients. Using preferred_date ensures the correct patients appear in the queue each day regardless of when they submitted their booking."
+</div>
+
+<h3>Q: What happens if the admin does not click Call Next at the end of the day?</h3>
+<div class="script-box">
+  "Any patients still in in_progress status from a previous day will be excluded from the current day's queue because getCurrentServing() filters by DATE(preferred_date) = today. To clean up stale in_progress appointments, the admin can run a manual SQL query in phpMyAdmin: UPDATE appointments SET status='confirmed' WHERE status='in_progress' AND DATE(preferred_date) < CURDATE(). The system does not auto-close in_progress appointments, only skipped ones."
+</div>
+
+<h3>Q: How does the SMS notification work when a patient is called?</h3>
+<div class="script-box">
+  "When the admin clicks Call Next, the system fetches the next confirmed patient, sets them to in_progress, and immediately calls the logSMS() function with the sms_template_called template. The message is customizable from the admin settings and supports [Patient Name] and [Queue #] placeholders. The SMS is sent via the SkySMS API and the result is logged in the sms_logs table whether it succeeded or failed. This gives the admin a full audit trail of all notifications sent."
+</div>
+
+<h3>Q: How do you handle the case where a patient books for a Sunday or a holiday?</h3>
+<div class="script-box">
+  "The patient portal's date picker uses a JavaScript validation function that checks if the selected date is a Sunday using date.getDay() === 0, and checks against a pre-defined set of Philippine public holidays including fixed holidays like New Year, Labor Day, Christmas, and moveable ones like Holy Week and Eid. If the patient selects a blocked date, the field is cleared and an error toast is shown. The admin dashboard's date filters also use the same blocking logic to prevent navigating to non-operating days."
+</div>
+
+<h3>Q: Why does the system store medical history as JSON instead of separate database columns?</h3>
+<div class="script-box">
+  "Medical history has a variable structure — different patients may have different combinations of symptoms, conditions, and lifestyle factors. Storing it as JSON in a MEDIUMTEXT column avoids creating dozens of nullable columns in the appointments table. The JSON is decoded in PHP when displaying the medical history modal in the admin dashboard. This approach is flexible and allows future fields to be added without altering the database schema."
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2>6. Technology Stack</h2>
+<table>
+  <tr><th>Layer</th><th>Technology</th><th>Purpose</th></tr>
+  <tr><td>Frontend</td><td>HTML5, CSS3, Vanilla JavaScript</td><td>Patient portal &amp; admin dashboard UI</td></tr>
+  <tr><td>Backend</td><td>PHP 8+</td><td>Server-side logic, API endpoints</td></tr>
+  <tr><td>Database</td><td>MySQL (MariaDB via XAMPP)</td><td>Data persistence</td></tr>
+  <tr><td>SMS Gateway</td><td>SkySMS REST API</td><td>OTP &amp; appointment notifications</td></tr>
+  <tr><td>Hosting</td><td>InfinityFree</td><td>Live deployment</td></tr>
+  <tr><td>Version Control</td><td>Git / GitHub</td><td>Source code management</td></tr>
+</table>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>7. File Structure</h2>
+<pre>
+Clinic/
+├── index.php                    ← Patient portal (single-page app)
+├── submit-appointment.php       ← Saves appointment to database
+├── send-otp.php                 ← Sends OTP via SMS
+├── verify-otp.php               ← Verifies entered OTP
+├── check-appointment-status.php ← Polls appointment status (patient side)
+├── get-appointments.php         ← Returns appointment history for a patient
+├── get-patients-by-mobile.php   ← Returns existing patient profiles by mobile
+├── db.php                       ← Database connection + Philippine timezone
+│
+├── includes/
+│   ├── config.php               ← Constants (API key, OTP settings, timezone)
+│   ├── config.local.php         ← Private credentials (git-ignored)
+│   └── sms.php                  ← SMS functions: sendSMS, generateAndSendOTP, verifyOTP
+│
+├── admin/
+│   ├── dashboard.php            ← Full admin panel (all tabs in one page)
+│   ├── login.php                ← Admin authentication
+│   ├── logout.php               ← Session destroy
+│   ├── appointment-action.php   ← Approve / reject / cancel appointments
+│   ├── queue-action.php         ← Call next / done / skip / reinsert queue
+│   ├── service-action.php       ← Add / edit / toggle services
+│   ├── save-settings.php        ← Save clinic settings &amp; SMS templates
+│   ├── send-manual-sms.php      ← Send manual SMS to a patient
+│   ├── sms-cron.php             ← Cron job: reminder SMS for upcoming queue
+│   ├── get-appt-detail.php      ← Returns full appointment detail for modal
+│   ├── get-patient.php          ← Returns patient profile detail
+│   ├── get-sms-history.php      ← Returns SMS history for a patient
+│   └── analytics-data.php       ← Returns chart data for analytics tab
+│
+├── css/
+│   ├── style.css                ← Shared base styles
+│   ├── patient.css              ← Patient portal glassmorphic styles
+│   └── admin.css                ← Admin dashboard styles
+│
+└── js/
+    ├── patient.js               ← Patient portal JavaScript
+    └── admin.js                 ← Admin dashboard JavaScript
+</pre>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2>8. Code Documentation — Important Blocks</h2>
+
+<h3>7.1 db.php — Database Connection</h3>
+<div class="box"><b>Purpose:</b> Establishes MySQL connection and sets Philippine timezone. Included by all PHP files needing the database.</div>
+<ul>
+  <li><code>date_default_timezone_set('Asia/Manila')</code> — ensures all PHP date functions use Philippine Standard Time (UTC+8). Critical for InfinityFree hosting which defaults to UTC.</li>
+  <li><code>db_query(sql, types, params)</code> — prepared statement wrapper preventing SQL injection.</li>
+  <li><code>db_row(sql, types, params)</code> — fetches a single row using a prepared statement.</li>
+  <li><code>db_insert_id()</code> — returns last auto-increment ID after an INSERT.</li>
+</ul>
+
+<h3>7.2 includes/sms.php — SMS Functions</h3>
+<div class="box"><b>Purpose:</b> All SMS sending logic. Used by send-otp.php, appointment-action.php, queue-action.php, and send-manual-sms.php.</div>
+
+<h4>sendSMS(string $mobile, string $message): array</h4>
+<p>Formats the mobile to E.164 (+63XXXXXXXXXX) and calls the SkySMS REST API via cURL.</p>
+<p><b>Number normalization:</b></p>
+<ul>
+  <li>10 digits (9XXXXXXXXX) → prepend 63 → +639XXXXXXXXX</li>
+  <li>11 digits starting with 0 → replace leading 0 with 63 → +639XXXXXXXXX</li>
+  <li>No + prefix → prepend + → +639XXXXXXXXX</li>
+</ul>
+
+<h4>generateAndSendOTP(string $mobile): bool</h4>
+<p>Generates a 6-digit OTP stored in PHP session with 5-minute expiry. If a valid OTP already exists for the same mobile within 5 minutes, the same code is reused — preventing confusion when the patient clicks Resend.</p>
+
+<h4>verifyOTP(string $mobile, string $submitted): bool</h4>
+<p>Validates the submitted code against the session-stored OTP. Uses <code>hash_equals()</code> for constant-time comparison. OTP is NOT cleared after verification — valid until natural expiry.</p>
+
+<h3>7.3 index.php — Patient Portal (Steps 0–7)</h3>
+<div class="box"><b>Purpose:</b> Single-page booking application. JavaScript controls step navigation via <code>goPatientStep(n)</code>. Browser Back button works via <code>history.pushState()</code>.</div>
+<table>
+  <tr><th>Step</th><th>Screen</th><th>Description</th></tr>
+  <tr><td>0</td><td>Landing</td><td>Welcome with Book and Queue Check options</td></tr>
+  <tr><td>1</td><td>Mobile Input</td><td>10-digit PH mobile with auto-formatter (+63 prefix)</td></tr>
+  <tr><td>2</td><td>OTP Entry</td><td>6-box input with auto-focus, backspace, and paste support</td></tr>
+  <tr><td>3</td><td>Profile</td><td>Name, DOB, sex, address, company — pre-filled for returning patients</td></tr>
+  <tr><td>4</td><td>Medical History</td><td>Symptoms, conditions, hereditary diseases, lifestyle info</td></tr>
+  <tr><td>5</td><td>Services &amp; Date</td><td>Lab test selection, date picker (Sundays + holidays blocked)</td></tr>
+  <tr><td>6</td><td>Queue Status</td><td>Real-time pending/approved/rejected display with 8-second polling</td></tr>
+  <tr><td>7</td><td>History</td><td>All past appointments for this mobile number</td></tr>
+</table>
+
+<h3>7.4 submit-appointment.php</h3>
+<div class="box"><b>Purpose:</b> Saves the booking. Creates or updates patient record, then inserts appointment as pending.</div>
+<ul>
+  <li>If mobile exists in <code>patients</code> → UPDATE profile (not duplicate)</li>
+  <li>If new → INSERT patient, get new ID</li>
+  <li>Priority flags validated against allowlist (senior, pregnant, pwd)</li>
+  <li>Medical history serialized to JSON</li>
+  <li>Returns <code>appointment_id</code> for frontend polling</li>
+</ul>
+
+<h3>7.5 admin/appointment-action.php — Approval Logic</h3>
+<div class="box"><b>Purpose:</b> Approve, reject, or cancel appointments from the admin panel.</div>
+<p><b>Approve:</b> Counts existing queue numbers for the same <code>preferred_date</code>. Assigns next sequential number (001, 002…). Updates status to <code>confirmed</code>. Sends approval SMS.</p>
+<p><b>Reject:</b> Updates status to <code>rejected</code>. Sends rejection SMS.</p>
+<p><b>Cancel:</b> Updates status to <code>cancelled</code> (no SMS).</p>
+
+<h3>7.6 admin/queue-action.php — Queue Operations</h3>
+<div class="box"><b>Purpose:</b> Real-time queue management. All queries filter by <code>DATE(preferred_date) = today</code> to prevent stale data from other days.</div>
+<table>
+  <tr><th>Action</th><th>What It Does</th></tr>
+  <tr><td>call</td><td>Marks current in_progress as done → gets next confirmed (priority first, then FIFO) → sets to in_progress → sends SMS</td></tr>
+  <tr><td>done</td><td>Marks current in_progress as done without calling next patient</td></tr>
+  <tr><td>skip</td><td>Moves current or selected confirmed patient to skipped</td></tr>
+  <tr><td>reinsert</td><td>Moves a skipped patient back to confirmed (back into queue)</td></tr>
+  <tr><td>priority_insert</td><td>Moves a patient to front of queue by setting created_at to 00:00:01 today</td></tr>
+</table>
+
+<h3>7.7 admin/dashboard.php — Notification Badge Logic</h3>
+<table>
+  <tr><th>Badge / Count</th><th>Source</th><th>Logic</th></tr>
+  <tr><td>Queue tab sidebar badge</td><td>$queueBadgeCount</td><td>count(waiting) + 1 if now serving — today only</td></tr>
+  <tr><td>Appointments sidebar badge</td><td>$allPendingCount</td><td>pending for the currently selected date</td></tr>
+  <tr><td>Dashboard stat cards</td><td>$todayStats</td><td>Always today's counts regardless of selected date</td></tr>
+  <tr><td>Appointments filter buttons</td><td>array_filter($allAppts)</td><td>Counts from currently loaded appointments (selected date)</td></tr>
+</table>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>9. API Endpoints Reference</h2>
+<table>
+  <tr><th>Endpoint</th><th>Method</th><th>Access</th><th>Purpose</th></tr>
+  <tr><td>send-otp.php</td><td>POST</td><td>Public</td><td>Send OTP to patient mobile</td></tr>
+  <tr><td>verify-otp.php</td><td>POST</td><td>Public</td><td>Verify OTP code</td></tr>
+  <tr><td>submit-appointment.php</td><td>POST</td><td>Public (verified)</td><td>Submit appointment booking</td></tr>
+  <tr><td>check-appointment-status.php</td><td>GET</td><td>Public</td><td>Poll appointment status by ID</td></tr>
+  <tr><td>get-appointments.php</td><td>GET</td><td>Public</td><td>Get patient appointment history</td></tr>
+  <tr><td>get-patients-by-mobile.php</td><td>GET</td><td>Public</td><td>Get existing patient profiles</td></tr>
+  <tr><td>admin/appointment-action.php</td><td>POST</td><td>Admin only</td><td>Approve / reject / cancel</td></tr>
+  <tr><td>admin/queue-action.php</td><td>POST</td><td>Admin only</td><td>Call / done / skip / reinsert</td></tr>
+  <tr><td>admin/service-action.php</td><td>POST</td><td>Admin only</td><td>Add / edit / toggle service</td></tr>
+  <tr><td>admin/save-settings.php</td><td>POST</td><td>Admin only</td><td>Save settings &amp; SMS templates</td></tr>
+  <tr><td>admin/send-manual-sms.php</td><td>POST</td><td>Admin only</td><td>Send manual SMS</td></tr>
+  <tr><td>admin/get-appt-detail.php</td><td>GET</td><td>Admin only</td><td>Full appointment detail</td></tr>
+  <tr><td>admin/get-patient.php</td><td>GET</td><td>Admin only</td><td>Patient profile detail</td></tr>
+  <tr><td>admin/get-sms-history.php</td><td>GET</td><td>Admin only</td><td>SMS history for patient</td></tr>
+  <tr><td>admin/analytics-data.php</td><td>GET</td><td>Admin only</td><td>Chart data for analytics</td></tr>
+  <tr><td>admin/sms-cron.php</td><td>GET</td><td>Server cron</td><td>Reminder SMS for upcoming queue</td></tr>
+</table>
+
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2>10. SQL Queries Reference</h2>
+<p>All queries use prepared statements in PHP to prevent SQL injection.</p>
+
+<h3>9.1 Patient Queries</h3>
+
+<h4>Find patient by mobile number</h4>
+<pre>SELECT id FROM patients WHERE mobile = ? LIMIT 1</pre>
+
+<h4>Insert new patient</h4>
+<pre>INSERT INTO patients (name, mobile, dob, sex, company, address)
+VALUES (?, ?, ?, ?, ?, ?)</pre>
+
+<h4>Update existing patient profile</h4>
+<pre>UPDATE patients SET name=?, dob=?, sex=?, company=?, address=?
+WHERE id=?</pre>
+
+<h4>Get all patients with appointment statistics</h4>
+<pre>SELECT p.*,
+  (SELECT COUNT(*) FROM appointments WHERE patient_id=p.id) AS appt_count,
+  (SELECT MAX(created_at) FROM appointments WHERE patient_id=p.id) AS last_visit,
+  (SELECT MAX(preferred_date) FROM appointments WHERE patient_id=p.id) AS last_appt_date,
+  (SELECT queue_number FROM appointments WHERE patient_id=p.id
+   AND queue_number IS NOT NULL ORDER BY created_at DESC LIMIT 1) AS last_queue
+FROM patients p ORDER BY p.name ASC LIMIT 100</pre>
+
+<h4>Get patients by mobile</h4>
+<pre>SELECT id, name, dob, sex, address, company
+FROM patients WHERE mobile = ? ORDER BY name ASC</pre>
+
+<h3>9.2 Appointment Queries</h3>
+
+<h4>Submit new appointment (pending)</h4>
+<pre>INSERT INTO appointments
+  (patient_id, patient_name, patient_mobile, services,
+   preferred_date, status, priority_flags, medical_history)
+VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)</pre>
+
+<h4>Get appointments for a selected date</h4>
+<pre>SELECT a.*, p.dob, p.address AS patient_address,
+       p.sex AS patient_sex, p.company AS patient_company
+FROM appointments a LEFT JOIN patients p ON a.patient_id = p.id
+WHERE DATE(a.preferred_date) = ?
+ORDER BY
+  CASE WHEN a.queue_number IS NULL OR a.queue_number='' THEN 1 ELSE 0 END,
+  CAST(a.queue_number AS UNSIGNED) ASC, a.created_at ASC</pre>
+
+<h4>Get appointment status for patient polling</h4>
+<pre>SELECT status, queue_number, services, preferred_date, patient_name
+FROM appointments WHERE id = ? LIMIT 1</pre>
+
+<h4>Count patients ahead in queue</h4>
+<pre>SELECT COUNT(*) AS cnt FROM appointments
+WHERE status = 'confirmed' AND queue_number &lt; ? AND queue_number IS NOT NULL</pre>
+
+<h4>Assign next queue number on approval</h4>
+<pre>SELECT COUNT(*) AS cnt FROM appointments
+WHERE DATE(preferred_date) = ? AND queue_number IS NOT NULL</pre>
+
+<h4>Approve appointment</h4>
+<pre>UPDATE appointments SET status='confirmed', queue_number=?, review_notes=? WHERE id=?</pre>
+
+<h4>Reject appointment</h4>
+<pre>UPDATE appointments SET status='rejected', review_notes=? WHERE id=?</pre>
+
+<h4>Get appointment history for a patient</h4>
+<pre>SELECT a.id, a.services, a.preferred_date, a.status,
+       a.queue_number, a.created_at
+FROM appointments a JOIN patients p ON a.patient_id = p.id
+WHERE p.mobile = ? ORDER BY a.created_at DESC LIMIT 20</pre>
+
+<h3>9.3 Queue Control Queries</h3>
+
+<h4>Get currently serving patient</h4>
+<pre>SELECT * FROM appointments
+WHERE status = 'in_progress' AND DATE(preferred_date) = ? LIMIT 1</pre>
+
+<h4>Get next confirmed patient (priority + FIFO)</h4>
+<pre>SELECT * FROM appointments
+WHERE status = 'confirmed' AND DATE(preferred_date) = ?
+ORDER BY
+  CASE WHEN priority_flags IS NOT NULL AND priority_flags != '' THEN 0 ELSE 1 END,
+  created_at ASC LIMIT 1</pre>
+
+<h4>Skip / Reinsert / Priority Insert</h4>
+<pre>UPDATE appointments SET status='skipped' WHERE id=?
+UPDATE appointments SET status='confirmed' WHERE id=? AND status='skipped'
+UPDATE appointments SET created_at = CONCAT(?, ' 00:00:01') WHERE id=? AND status='confirmed'</pre>
+
+<h4>5 PM Auto-Disregard</h4>
+<pre>UPDATE appointments SET status='disregarded'
+WHERE status='skipped' AND DATE(preferred_date) = ?</pre>
+
+<h3>9.4 SMS Cron — 7 AM Reminder</h3>
+<pre>SELECT * FROM appointments
+WHERE DATE(preferred_date) = ? AND status IN ('confirmed', 'in_progress')
+  AND queue_number IS NOT NULL
+ORDER BY CAST(queue_number AS UNSIGNED) ASC LIMIT 5</pre>
+
+<h3>9.5 SMS Log Queries</h3>
+<pre>SELECT COUNT(*) AS c FROM sms_logs WHERE status='sent' AND DATE(created_at) = ?
+SELECT sl.*, a.preferred_date FROM sms_logs sl
+  LEFT JOIN appointments a ON sl.appointment_id = a.id
+  WHERE DATE(sl.created_at) = ? ORDER BY sl.created_at DESC
+SELECT * FROM sms_logs WHERE patient_mobile = ? ORDER BY created_at DESC LIMIT 50</pre>
+
+<h3>9.6 Service Queries</h3>
+<pre>SELECT s.id, s.name, s.price, s.is_basic, s.active, c.name AS category_name
+FROM services s JOIN service_categories c ON s.category_id=c.id ORDER BY c.sort_order, s.name
+INSERT INTO services (category_id, name, price, duration, is_basic, active) VALUES (?,?,?,0,0,?)
+UPDATE services SET name=?, price=?, active=? WHERE id=?</pre>
+
+<h3>9.7 Settings</h3>
+<pre>SELECT setting_key, setting_value FROM settings
+INSERT INTO settings (setting_key, setting_value) VALUES (?,?)
+ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)</pre>
+
+<h3>9.8 Analytics</h3>
+<pre>SELECT DATE(preferred_date) AS date, COUNT(*) AS count FROM appointments
+WHERE preferred_date >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+GROUP BY DATE(preferred_date) ORDER BY date ASC</pre>
+
+<h3>9.9 Admin Authentication</h3>
+<pre>SELECT id, password_hash, full_name FROM admins WHERE username = ? LIMIT 1</pre>
+
+<h3>9.10 Useful Manual Queries (phpMyAdmin)</h3>
+
+<h4>View all pending appointments across all dates</h4>
+<pre>SELECT id, patient_name, preferred_date, status, created_at
+FROM appointments WHERE status='pending' ORDER BY preferred_date ASC;</pre>
+
+<h4>View today's complete queue</h4>
+<pre>SELECT queue_number, patient_name, services, status, priority_flags
+FROM appointments WHERE DATE(preferred_date) = CURDATE()
+ORDER BY CAST(queue_number AS UNSIGNED) ASC;</pre>
+
+<h4>Count total appointments per status</h4>
+<pre>SELECT status, COUNT(*) AS total FROM appointments
+GROUP BY status ORDER BY total DESC;</pre>
+
+<h4>Find all appointments for a patient</h4>
+<pre>SELECT p.name, p.mobile, a.preferred_date, a.status, a.queue_number, a.services
+FROM patients p JOIN appointments a ON p.id = a.patient_id
+WHERE p.mobile = '+639XXXXXXXXX' ORDER BY a.created_at DESC;</pre>
+
+<h4>Reset stuck in_progress appointment</h4>
+<pre>UPDATE appointments SET status='confirmed'
+WHERE status='in_progress' AND DATE(preferred_date) = CURDATE();</pre>
+
+<h4>Get total income for a date range</h4>
+<pre>SELECT DATE(a.preferred_date) AS date,
+       SUM(s.price) AS estimated_income, COUNT(DISTINCT a.id) AS appointments
+FROM appointments a JOIN services s ON FIND_IN_SET(s.name, a.services) &gt; 0
+WHERE a.status = 'done' AND a.preferred_date BETWEEN '2026-06-01' AND '2026-06-30'
+GROUP BY DATE(a.preferred_date) ORDER BY date ASC;</pre>
+
+<div class="page-break"></div>
+<h2>11. Debugging &amp; Troubleshooting Guide</h2>
+<p>This section covers known issues encountered during development and deployment, with exact steps to diagnose and fix each one.</p>
+
+<!-- ─── SMS ──────────────────────────────────────────────── -->
+<h3>11.1 SMS Not Sending — "Unable to send SMS"</h3>
+<div class="box"><b>Symptoms:</b> Patient sees "Unable to send SMS." OTP never arrives. Manual SMS in admin fails.</div>
+<table>
+  <tr><th>Cause</th><th>How to Check</th><th>Fix</th></tr>
+  <tr><td><code>config.local.php</code> missing on live server</td><td>Check InfinityFree File Manager → <code>includes/</code></td><td>Create the file manually with your SkySMS API key</td></tr>
+  <tr><td>SkySMS free plan (402 error)</td><td>Check SkySMS dashboard Credits Balance</td><td>Top up credits or upgrade plan</td></tr>
+  <tr><td>Wrong API key</td><td>Copy fresh key from SkySMS Dashboard → API Keys</td><td>Update <code>config.local.php</code> on live server</td></tr>
+  <tr><td>Phone number not 10 digits starting with 9</td><td>Check what number is being sent</td><td>Mobile formatter in <code>patient.js</code> strips and validates — ensure input is correct</td></tr>
+</table>
+<h4>Quick Debug — add temporarily to sms.php after cURL call</h4>
+<pre>error_log('SkySMS HTTP: ' . $httpCode . ' Response: ' . $response);</pre>
+<p>Check PHP error log in InfinityFree cPanel → Error Logs.</p>
+
+<!-- ─── OTP ──────────────────────────────────────────────── -->
+<h3>11.2 OTP "Incorrect or Expired" Even When Correct</h3>
+<div class="box"><b>Symptoms:</b> Patient enters the right code but gets rejected. Expires immediately after sending.</div>
+<table>
+  <tr><th>Cause</th><th>Fix</th></tr>
+  <tr><td>Timezone mismatch — server UTC vs PH time</td><td><code>date_default_timezone_set('Asia/Manila')</code> is in both <code>db.php</code> and <code>config.php</code> — verify files are updated on live server</td></tr>
+  <tr><td>Session not persisting between requests</td><td>Access site through the full domain URL (not IP). On InfinityFree, use <code>mvmasankayclinic.xo.je</code> consistently.</td></tr>
+  <tr><td>Patient changed mobile between OTP request and verification</td><td>Session <code>otp_mobile</code> must match submitted mobile — patient must not navigate back and change number</td></tr>
+</table>
+<h4>Quick Debug — add temporarily to verify-otp.php</h4>
+<pre>
+error_log('OTP in session: ' . ($_SESSION['otp_code'] ?? 'EMPTY'));
+error_log('Expires: ' . ($_SESSION['otp_expires'] ?? '0') . ' | Now: ' . time());
+error_log('Submitted: ' . $code . ' | Mobile: ' . $mobile);
+</pre>
+
+<!-- ─── WRONG DATE / SMS LOGS EMPTY ──────────────────────── -->
+<h3>11.3 SMS Logs Tab Shows No Data on Live Site</h3>
+<div class="box"><b>Symptoms:</b> SMS Logs tab is empty on the live site but works on localhost. Sent/failed counts all show 0.</div>
+<p><b>Cause:</b> InfinityFree MySQL uses UTC. PHP <code>date()</code> now returns PH date but MySQL's <code>DATE(created_at)</code> still evaluates in UTC, causing a date mismatch.</p>
+<h4>Fix — Already Applied in db.php</h4>
+<pre>$mysqli->query("SET time_zone = '+08:00'");</pre>
+<p>If the issue persists, verify the updated <code>db.php</code> is deployed to InfinityFree. Create <code>test-time.php</code> on server to verify:</p>
+<pre>&lt;?php require_once 'db.php'; echo date('Y-m-d H:i:s'); // Should show PH time</pre>
+
+<!-- ─── QUEUE NOT UPDATING ───────────────────────────────── -->
+<h3>11.4 Queue Shows Wrong / Stale "Now Serving" Patient</h3>
+<div class="box"><b>Symptoms:</b> A patient from a previous day still appears as Now Serving. Queue does not progress.</div>
+<p><b>Cause:</b> An appointment was left in <code>in_progress</code> status when the admin closed the browser without marking done.</p>
+<h4>Fix — Run in phpMyAdmin</h4>
+<pre>UPDATE appointments SET status = 'done'
+WHERE status = 'in_progress' AND DATE(preferred_date) &lt; CURDATE();</pre>
+
+<!-- ─── SKIP NOT WORKING ──────────────────────────────────── -->
+<h3>11.5 Skip Button Does Not Show Patient in Skipped Table</h3>
+<div class="box"><b>Symptoms:</b> Clicking Skip shows "Patient skipped" toast but the skipped table does not appear after reload.</div>
+<p><b>Cause:</b> PHP's <code>getCurrentServing()</code> filters by <code>DATE(preferred_date) = today</code>. If this returns null (timezone edge case on live server), the fallback UPDATE only targeted <code>status='confirmed'</code> — missing the <code>in_progress</code> patient.</p>
+<h4>Fix — Already Applied in queue-action.php</h4>
+<pre>UPDATE appointments SET status='skipped'
+WHERE id=? AND status IN ('confirmed','in_progress')</pre>
+<p>Also ensure the MySQL timezone is set to PH time (see 11.3).</p>
+
+<!-- ─── PROFILE OVERWRITE ────────────────────────────────── -->
+<h3>11.6 Multiple People Using Same Mobile — Only Last Person Shows in Profile List</h3>
+<div class="box"><b>Symptoms:</b> Two family members book using the same number. Only the latest person's name appears in the existing profile selection.</div>
+<p><b>Cause:</b> <code>submit-appointment.php</code> was doing <code>SELECT id FROM patients WHERE mobile=? LIMIT 1</code> and overwriting that record with whoever just booked.</p>
+<h4>Fix — Already Applied</h4>
+<ul>
+  <li><b>patient.js</b> — now sends <code>patient_id</code> when an existing profile is selected.</li>
+  <li><b>submit-appointment.php</b> — if <code>patient_id</code> is provided, updates only that specific record. If <code>patient_id = 0</code> (new profile), always inserts a new patient record instead of overwriting.</li>
+</ul>
+
+<!-- ─── APPOINTMENTS NOT SHOWING ─────────────────────────── -->
+<h3>11.7 Admin Cannot See Pending Bookings</h3>
+<div class="box"><b>Symptoms:</b> Patient booked but admin sees empty appointments list. Badge shows 0.</div>
+<table>
+  <tr><th>Issue</th><th>Fix</th></tr>
+  <tr><td>Appointment is for a future date</td><td>Admin must navigate the date picker to the patient's chosen appointment date</td></tr>
+  <tr><td>Booking failed silently</td><td>Open browser DevTools → Network → check <code>submit-appointment.php</code> response for error message</td></tr>
+  <tr><td>Wrong database (localhost vs live)</td><td>Ensure you are checking the correct environment's phpMyAdmin</td></tr>
+</table>
+<h4>Quick Check — phpMyAdmin</h4>
+<pre>SELECT id, patient_name, preferred_date, status, created_at
+FROM appointments WHERE status='pending' ORDER BY created_at DESC LIMIT 10;</pre>
+
+<!-- ─── SERVICE MODAL ────────────────────────────────────── -->
+<h3>11.8 Add/Edit Service Modal Not Opening</h3>
+<div class="box"><b>Symptoms:</b> Clicking Add Service or Edit does nothing. No popup appears.</div>
+<table>
+  <tr><th>Error in Console (F12)</th><th>Fix</th></tr>
+  <tr><td><code>Cannot set properties of null</code></td><td>JS references a removed HTML element — hard refresh Ctrl+Shift+R</td></tr>
+  <tr><td><code>admin.js 404</code></td><td>File not deployed — re-upload via File Manager or push to GitHub and pull on server</td></tr>
+  <tr><td>Category dropdown empty</td><td>Run: <code>INSERT INTO service_categories (name,slug,sort_order) VALUES ('Laboratory','lab',1),('Diagnostics','diagnostic',2);</code></td></tr>
+</table>
+
+<!-- ─── DATABASE CONNECTION ──────────────────────────────── -->
+<h3>11.9 "Database connection failed" on Live Site</h3>
+<div class="box"><b>Symptoms:</b> White page with database error after deploying to InfinityFree.</div>
+<p><b>Cause:</b> GitHub repo uses localhost credentials. InfinityFree needs different credentials.</p>
+<h4>Fix — Update db.php on InfinityFree File Manager (do NOT commit these to GitHub)</h4>
+<pre>
+$DB_HOST = 'sql311.infinityfree.com';
+$DB_USER = 'if0_42052099';
+$DB_PASS = 'mvmasangkay123';
+$DB_NAME = 'if0_42052099_clinic_db';
+</pre>
+
+<!-- ─── CRON JOB ──────────────────────────────────────────── -->
+<h3>11.10 7 AM Reminder SMS Not Sending Automatically</h3>
+<div class="box"><b>Symptoms:</b> Works when visiting sms-cron.php manually but not automatically at 7 AM.</div>
+<ol>
+  <li>Visit <code>https://mvmasankayclinic.xo.je/admin/sms-cron.php</code> in browser — verify it works manually first.</li>
+  <li>Go to InfinityFree cPanel → Cron Jobs — verify the URL and schedule.</li>
+  <li><b>InfinityFree uses UTC.</b> To run at 7 AM PH time (UTC+8), set cron hour to <b>23</b> (11 PM UTC = 7 AM PH next day).</li>
+</ol>
+<table>
+  <tr><th>Cron Field</th><th>Value</th></tr>
+  <tr><td>Minute</td><td>0</td></tr>
+  <tr><td>Hour</td><td>23 (UTC) = 7 AM PH</td></tr>
+  <tr><td>Day / Month</td><td>*</td></tr>
+  <tr><td>Weekday</td><td>1-6 (Mon–Sat, skip Sunday)</td></tr>
+  <tr><td>URL</td><td>https://mvmasankayclinic.xo.je/admin/sms-cron.php</td></tr>
+</table>
+
+<!-- ─── PATIENT PORTAL BLANK ─────────────────────────────── -->
+<h3>11.11 Patient Portal Blank or Buttons Do Nothing</h3>
+<div class="box"><b>Symptoms:</b> Page loads but clicking Send OTP or other buttons does nothing. No steps advance.</div>
+<ol>
+  <li>Press <b>F12</b> → Console tab — look for red errors.</li>
+  <li>Hard refresh: <b>Ctrl+Shift+R</b></li>
+  <li>Check Network tab — verify <code>patient.js</code> loaded with status 200.</li>
+</ol>
+<table>
+  <tr><th>Error</th><th>Fix</th></tr>
+  <tr><td><code>patient.js 404</code></td><td>Re-upload <code>js/patient.js</code> via File Manager</td></tr>
+  <tr><td><code>showToast is not defined</code></td><td>JS loaded partially — hard refresh and clear browser cache</td></tr>
+  <tr><td>Back button loops to same step</td><td>Already handled via <code>history.replaceState</code> on page load</td></tr>
+</table>
+
+<!-- ─── USEFUL SQL ────────────────────────────────────────── -->
+<h3>11.12 Useful phpMyAdmin Maintenance Queries</h3>
+
+<h4>View all pending appointments (all dates)</h4>
+<pre>SELECT id, patient_name, preferred_date, status, created_at
+FROM appointments WHERE status='pending' ORDER BY preferred_date ASC;</pre>
+
+<h4>Reset stuck in_progress appointment</h4>
+<pre>UPDATE appointments SET status='confirmed'
+WHERE status='in_progress' AND DATE(preferred_date) &lt; CURDATE();</pre>
+
+<h4>View today's complete queue</h4>
+<pre>SELECT queue_number, patient_name, services, status, priority_flags
+FROM appointments WHERE DATE(preferred_date) = CURDATE()
+ORDER BY CAST(queue_number AS UNSIGNED) ASC;</pre>
+
+<h4>Count appointments by status</h4>
+<pre>SELECT status, COUNT(*) AS total FROM appointments
+GROUP BY status ORDER BY total DESC;</pre>
+
+<h4>Find all appointments for a specific mobile number</h4>
+<pre>SELECT patient_name, preferred_date, status, queue_number, services
+FROM appointments WHERE patient_mobile = '+639XXXXXXXXX'
+ORDER BY created_at DESC;</pre>
+
+<h4>Remove test/dummy data before go-live</h4>
+<pre>DELETE FROM appointments WHERE patient_name LIKE '%test%' OR patient_name LIKE '%dummy%';
+DELETE FROM patients WHERE name LIKE '%test%' OR name LIKE '%dummy%';</pre>
+
+<br/><br/>
+<p class="center" style="color:#888; font-size:10pt;">
+  — End of Documentation —<br/>
+  M.V. Masangkay Clinic Appointment &amp; Queue Management System — 2026
+</p>
+
+</body>
+</html>
